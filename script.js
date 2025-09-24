@@ -1,0 +1,614 @@
+
+        // Video data with local filenames
+        let videoFiles = [
+            { 
+                id: 1, 
+                title: "Alaguntan part 1", 
+                filename: "video1.mp4", 
+                likes: 42, 
+                views: 1200,
+                date: "2023-06-15",
+                duration: "2:45",
+                tags: ["nature", "adventure", "mountains"]
+            },
+            { 
+                id: 2, 
+                title: "Alaguntan part 2", 
+                filename: "video2.mp4", 
+                likes: 28, 
+                views: 850,
+                date: "2023-06-10",
+                duration: "1:30",
+                tags: ["beach", "sunset", "relaxing"]
+            },
+            { 
+                id: 3, 
+                title: "How.to.Trian.Your.Dragon", 
+                filename: "video3.mp4", 
+                likes: 56, 
+                views: 2100,
+                date: "2023-06-05",
+                duration: "3:15",
+                tags: ["city", "urban", "timelapse"]
+            },
+            { 
+                id: 4, 
+                title: "Hitman_Agent_47_360P", 
+                filename: "video4.mp4", 
+                likes: 35, 
+                views: 950,
+                date: "2023-06-20",
+                duration: "4:20",
+                tags: ["forest", "nature", "walking"]
+            }
+        ];
+
+        // Configuration
+        let autoplayEnabled = true;
+        let darkMode = false;
+        let currentFilter = "all";
+        let searchQuery = "";
+        let highlightedVideoId = null;
+
+        // DOM elements
+        const videoFeed = document.getElementById('videoFeed');
+        const refreshBtn = document.getElementById('refreshBtn');
+        const toggleAutoplay = document.getElementById('toggleAutoplay');
+        const themeToggle = document.getElementById('themeToggle');
+        const searchInput = document.getElementById('searchInput');
+        const filterSelect = document.getElementById('filterSelect');
+        const progressBar = document.getElementById('progressBar');
+        const notification = document.getElementById('notification');
+        const notificationText = document.getElementById('notificationText');
+        const totalVideos = document.getElementById('totalVideos');
+        const totalLikes = document.getElementById('totalLikes');
+        const totalViews = document.getElementById('totalViews');
+        const lastUpdate = document.getElementById('lastUpdate');
+
+        // Initialize the app
+        function initApp() {
+            updateStats();
+            loadVideos();
+            setupEventListeners();
+            startVideoChecker();
+            updateLastUpdateTime();
+            setupGlobalKeyboardListeners();
+        }
+
+        // Set up event listeners
+        function setupEventListeners() {
+            refreshBtn.addEventListener('click', loadVideos);
+            toggleAutoplay.addEventListener('click', toggleAutoplayHandler);
+            themeToggle.addEventListener('click', toggleTheme);
+            
+            // Search and filter
+            searchInput.addEventListener('input', handleSearch);
+            filterSelect.addEventListener('change', handleFilter);
+            
+            // Handle scroll for pausing videos out of view
+            window.addEventListener('scroll', handleScroll);
+        }
+
+        // Global keyboard listeners for video controls
+        function setupGlobalKeyboardListeners() {
+            document.addEventListener('keydown', (e) => {
+                const activeVideo = document.querySelector('video:focus, .video-container:focus-within video');
+                if (!activeVideo) return;
+
+                switch (e.code) {
+                    case 'Space':
+                        e.preventDefault();
+                        activeVideo.paused ? activeVideo.play() : activeVideo.pause();
+                        break;
+                    case 'ArrowLeft':
+                        activeVideo.currentTime -= 10;
+                        break;
+                    case 'ArrowRight':
+                        activeVideo.currentTime += 10;
+                        break;
+                    case 'KeyM':
+                        activeVideo.muted = !activeVideo.muted;
+                        break;
+                    case 'KeyF':
+                        if (activeVideo.requestFullscreen) activeVideo.requestFullscreen();
+                        break;
+                }
+            });
+        }
+
+        // Load and display videos with filtering and search
+        function loadVideos() {
+            videoFeed.innerHTML = '';
+            
+            // Filter videos based on current filter and search query
+            let filteredVideos = filterVideos(videoFiles);
+            
+            if (filteredVideos.length === 0) {
+                videoFeed.innerHTML = `
+                    <div class="no-videos">
+                        <i class="fas fa-video-slash fa-3x"></i>
+                        <h3>No videos found</h3>
+                        <p>Try changing your search or add some videos to get started!</p>
+                    </div>
+                `;
+                return;
+            }
+
+            filteredVideos.forEach((video, index) => {
+                const videoCard = createVideoCard(video, index);
+                videoFeed.appendChild(videoCard);
+            });
+            
+            updateStats();
+            showNotification(`${filteredVideos.length} videos loaded`);
+            
+            // Highlight and scroll to the first matching video if there's a search query
+            if (searchQuery && filteredVideos.length > 0) {
+                highlightAndScrollToVideo(filteredVideos[0].id);
+            }
+        }
+
+        // Filter videos based on current filter and search
+        function filterVideos(videos) {
+            let filtered = videos;
+            
+            // Apply search filter
+            if (searchQuery) {
+                filtered = filtered.filter(video => 
+                    video.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    video.tags.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()))
+                );
+            }
+            
+            // Apply category filter
+            switch(currentFilter) {
+                case 'recent':
+                    filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
+                    break;
+                case 'popular':
+                    filtered.sort((a, b) => b.views - a.views);
+                    break;
+                case 'liked':
+                    filtered.sort((a, b) => b.likes - a.likes);
+                    break;
+            }
+            
+            return filtered;
+        }
+
+        // Create a video card element with full custom player
+        function createVideoCard(video, index) {
+            const videoCard = document.createElement('div');
+            videoCard.className = 'video-card';
+            videoCard.id = `video-${video.id}`;
+            videoCard.tabIndex = 0; // For focus
+            
+            // Add highlighted class if this is the video to highlight
+            if (video.id === highlightedVideoId) {
+                videoCard.classList.add('highlighted');
+            }
+            
+            if (index === videoFiles.length - 1) {
+                videoCard.classList.add('new-video');
+            }
+
+            // Highlight search terms in title and tags
+            const highlightedTitle = highlightSearchTerms(video.title, searchQuery);
+            const highlightedTags = video.tags.map(tag => 
+                `<span style="background: rgba(0,0,0,0.1); padding: 3px 8px; border-radius: 20px; margin-left: 5px; font-size: 0.8rem;">#${highlightSearchTerms(tag, searchQuery)}</span>`
+            ).join('');
+
+            videoCard.innerHTML = `
+                <div class="video-header">
+                    <div class="video-title">
+                        <i class="fas fa-play"></i> ${highlightedTitle}
+                        <span style="font-size: 0.8rem; color: #7f8c8d; margin-left: 10px;">${video.duration}</span>
+                    </div>
+                    <div class="video-actions">
+                        <button class="action-btn like-btn" data-id="${video.id}" title="Like" aria-label="Like video">
+                            <i class="far fa-heart"></i> <span>${video.likes}</span>
+                        </button>
+                        <button class="action-btn download-btn" data-id="${video.id}" title="Download" aria-label="Download video">
+                            <i class="fas fa-download"></i>
+                        </button>
+                        <button class="action-btn save-btn" data-id="${video.id}" title="Save" aria-label="Save video">
+                            <i class="far fa-bookmark"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="video-container" tabindex="0">
+                    <video src="${video.filename}" ${autoplayEnabled ? 'autoplay muted' : 'muted'} loop playsinline preload="metadata">
+                        Your browser does not support the video tag.
+                    </video>
+                    <div class="loading-spinner" id="spinner-${video.id}">
+                        <i class="fas fa-spinner fa-spin"></i>
+                    </div>
+                    <div class="video-error" id="error-${video.id}">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <p>Video file "${video.filename}" not found</p>
+                        <p>Please check if the file exists in the same directory</p>
+                    </div>
+                    <div class="custom-video-controls">
+                        <div class="control-bar">
+                            <button class="player-btn play-pause-btn" title="Play/Pause (Space)" aria-label="Play/Pause">
+                                <i class="fas fa-play"></i>
+                            </button>
+                            <div class="seek-bar" tabindex="0">
+                                <div class="seek-progress"></div>
+                                <div class="seek-thumb"></div>
+                            </div>
+                            <div class="time-display">
+                                <span class="current-time">0:00</span> / <span class="duration">${video.duration}</span>
+                            </div>
+                            <div class="volume-container">
+                                <button class="player-btn volume-btn" title="Mute/Unmute (M)" aria-label="Volume">
+                                    <i class="fas fa-volume-up"></i>
+                                </button>
+                                <div class="volume-bar" tabindex="0">
+                                    <div class="volume-progress"></div>
+                                </div>
+                            </div>
+                            <select class="speed-select" title="Playback Speed">
+                                <option value="0.5">0.5x</option>
+                                <option value="1" selected>1x</option>
+                                <option value="1.5">1.5x</option>
+                                <option value="2">2x</option>
+                            </select>
+                            <button class="player-btn pip-btn" title="Picture-in-Picture" aria-label="Picture-in-Picture">
+                                <i class="fas fa-external-link-alt"></i>
+                            </button>
+                            <button class="player-btn fullscreen-btn" title="Fullscreen (F)" aria-label="Fullscreen">
+                                <i class="fas fa-expand"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="video-info">
+                    <div class="video-stats">
+                        <div class="video-stat">
+                            <i class="far fa-eye"></i> ${video.views} views
+                        </div>
+                        <div class="video-stat">
+                            <i class="far fa-calendar"></i> ${formatDate(video.date)}
+                        </div>
+                    </div>
+                    <div class="video-date">
+                        ${highlightedTags}
+                    </div>
+                </div>
+            `;
+
+            // Setup custom player for this video
+            setupCustomPlayer(videoCard, video.id);
+
+            // Add event listeners to action buttons
+            const likeBtn = videoCard.querySelector('.like-btn');
+            likeBtn.addEventListener('click', () => likeVideo(video.id));
+
+            const downloadBtn = videoCard.querySelector('.download-btn');
+            downloadBtn.addEventListener('click', () => downloadVideo(video.id, video.title, video.filename));
+
+            const saveBtn = videoCard.querySelector('.save-btn');
+            saveBtn.addEventListener('click', () => saveVideo(video.id));
+
+            // Double-click for fullscreen
+            const videoContainer = videoCard.querySelector('.video-container');
+            videoContainer.addEventListener('dblclick', () => {
+                const video = videoContainer.querySelector('video');
+                if (video.requestFullscreen) video.requestFullscreen();
+            });
+
+            return videoCard;
+        }
+
+        // Setup full custom player functionality
+        function setupCustomPlayer(videoCard, videoId) {
+            const video = videoCard.querySelector('video');
+            const container = videoCard.querySelector('.video-container');
+            const spinner = videoCard.querySelector(`#spinner-${videoId}`);
+            const errorMsg = videoCard.querySelector(`#error-${videoId}`);
+            const playPauseBtn = videoCard.querySelector('.play-pause-btn');
+            const volumeBtn = videoCard.querySelector('.volume-btn');
+            const fullscreenBtn = videoCard.querySelector('.fullscreen-btn');
+            const pipBtn = videoCard.querySelector('.pip-btn');
+            const seekBar = videoCard.querySelector('.seek-bar');
+            const seekProgress = videoCard.querySelector('.seek-progress');
+            const seekThumb = videoCard.querySelector('.seek-thumb');
+            const currentTimeEl = videoCard.querySelector('.current-time');
+            const durationEl = videoCard.querySelector('.duration');
+            const volumeBar = videoCard.querySelector('.volume-bar');
+            const volumeProgress = videoCard.querySelector('.volume-progress');
+            const speedSelect = videoCard.querySelector('.speed-select');
+
+            // Loading state
+            video.addEventListener('loadstart', () => {
+                spinner.classList.add('show');
+                errorMsg.classList.remove('show');
+            });
+            
+            video.addEventListener('canplay', () => {
+                spinner.classList.remove('show');
+                errorMsg.classList.remove('show');
+                container.classList.add('active');
+            });
+            
+            video.addEventListener('error', () => {
+                spinner.classList.remove('show');
+                errorMsg.classList.add('show');
+                showNotification(`Error loading video: ${video.src.split('/').pop()}`);
+            });
+
+            // Play/Pause
+            function togglePlayPause() {
+                if (video.paused) {
+                    video.play().then(() => {
+                        playPauseBtn.innerHTML = '<i class="fas fa-pause"></i>';
+                    }).catch(e => {
+                        console.error('Error playing video:', e);
+                        showNotification('Error playing video. File may be missing or corrupted.');
+                    });
+                } else {
+                    video.pause();
+                    playPauseBtn.innerHTML = '<i class="fas fa-play"></i>';
+                }
+            }
+            playPauseBtn.addEventListener('click', togglePlayPause);
+            video.addEventListener('click', togglePlayPause); // Click video to play/pause
+
+            // Volume
+            volumeBtn.addEventListener('click', () => {
+                video.muted = !video.muted;
+                volumeBtn.innerHTML = video.muted ? '<i class="fas fa-volume-mute"></i>' : '<i class="fas fa-volume-up"></i>';
+                volumeProgress.style.width = video.muted ? '0%' : `${video.volume * 100}%`;
+            });
+
+            // Volume slider
+            volumeBar.addEventListener('click', (e) => {
+                const rect = volumeBar.getBoundingClientRect();
+                const percent = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
+                video.volume = percent / 100;
+                volumeProgress.style.width = `${percent}%`;
+                video.muted = false;
+                volumeBtn.innerHTML = '<i class="fas fa-volume-up"></i>';
+            });
+
+            // Seek bar
+            seekBar.addEventListener('click', (e) => {
+                const rect = seekBar.getBoundingClientRect();
+                const percent = (e.clientX - rect.left) / rect.width;
+                video.currentTime = percent * video.duration;
+            });
+
+            // Progress update
+            video.addEventListener('timeupdate', () => {
+                const percent = (video.currentTime / video.duration) * 100;
+                seekProgress.style.width = `${percent}%`;
+                seekThumb.style.left = `${percent}%`;
+                currentTimeEl.textContent = formatTime(video.currentTime);
+            });
+
+            video.addEventListener('loadedmetadata', () => {
+                durationEl.textContent = formatTime(video.duration);
+            });
+
+            // Speed control
+            speedSelect.addEventListener('change', (e) => {
+                video.playbackRate = parseFloat(e.target.value);
+            });
+
+            // Fullscreen
+            fullscreenBtn.addEventListener('click', () => {
+                if (video.requestFullscreen) {
+                    video.requestFullscreen();
+                } else if (video.webkitRequestFullscreen) {
+                    video.webkitRequestFullscreen();
+                }
+            });
+
+            // Picture-in-Picture
+            pipBtn.addEventListener('click', () => {
+                if (video.requestPictureInPicture) {
+                    video.requestPictureInPicture();
+                }
+            });
+
+            // Views tracking
+            video.addEventListener('play', () => {
+                const videoData = videoFiles.find(v => v.id === videoId);
+                if (videoData) videoData.views++;
+                updateStats();
+            });
+
+            // Show controls on hover/focus
+            [video, container].forEach(el => {
+                el.addEventListener('mouseenter focus', () => container.classList.add('active'));
+                el.addEventListener('mouseleave blur', () => {
+                    if (!video.paused) container.classList.remove('active');
+                });
+            });
+        }
+
+        // Format time
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        // Highlight search terms in text
+        function highlightSearchTerms(text, query) {
+            if (!query) return text;
+            
+            const regex = new RegExp(`(${query})`, 'gi');
+            return text.replace(regex, '<mark style="background-color: var(--highlight-color);">$1</mark>');
+        }
+
+        // Highlight and scroll to a specific video
+        function highlightAndScrollToVideo(videoId) {
+            // Remove highlight from previously highlighted video
+            if (highlightedVideoId) {
+                const prevHighlighted = document.getElementById(`video-${highlightedVideoId}`);
+                if (prevHighlighted) {
+                    prevHighlighted.classList.remove('highlighted');
+                }
+            }
+            
+            // Highlight the new video
+            highlightedVideoId = videoId;
+            const videoElement = document.getElementById(`video-${videoId}`);
+            if (videoElement) {
+                videoElement.classList.add('highlighted');
+                
+                // Scroll to the video with smooth animation
+                videoElement.scrollIntoView({ 
+                    behavior: 'smooth', 
+                    block: 'center'
+                });
+            }
+        }
+
+        // Format date for display
+        function formatDate(dateString) {
+            const options = { year: 'numeric', month: 'short', day: 'numeric' };
+            return new Date(dateString).toLocaleDateString(undefined, options);
+        }
+
+        // Like a video
+        function likeVideo(videoId) {
+            const video = videoFiles.find(v => v.id === videoId);
+            if (video) {
+                video.likes++;
+                loadVideos();
+                showNotification(`Liked "${video.title}"`);
+            }
+        }
+
+        // Download video
+        function downloadVideo(videoId, title, filename) {
+            const video = videoFiles.find(v => v.id === videoId);
+            if (!video) return;
+
+            const downloadBtn = document.querySelector(`.download-btn[data-id="${videoId}"]`);
+            downloadBtn.classList.add('downloading');
+            downloadBtn.querySelector('i').className = 'fas fa-spinner fa-spin';
+
+            showNotification(`Starting download of "${title}"...`);
+
+            // Create a temporary anchor element to trigger download
+            const a = document.createElement('a');
+            a.href = filename;
+            a.download = `${title.replace(/\s+/g, '_')}.mp4`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+
+            // Reset button state after a delay
+            setTimeout(() => {
+                downloadBtn.classList.remove('downloading');
+                downloadBtn.querySelector('i').className = 'fas fa-download';
+                showNotification(`"${title}" download initiated`);
+            }, 1000);
+        }
+
+        // Save a video
+        function saveVideo(videoId) {
+            const video = videoFiles.find(v => v.id === videoId);
+            if (video) {
+                showNotification(`"${video.title}" saved to your collection`);
+                // In a real app, you would add to user's saved videos
+            }
+        }
+
+        // Toggle autoplay
+        function toggleAutoplayHandler() {
+            autoplayEnabled = !autoplayEnabled;
+            toggleAutoplay.innerHTML = `
+                <i class="fas fa-play"></i> Autoplay: ${autoplayEnabled ? 'On' : 'Off'}
+            `;
+            
+            // Update all videos
+            const videos = document.querySelectorAll('video');
+            videos.forEach(video => {
+                if (autoplayEnabled) {
+                    video.play().catch(e => console.log('Autoplay prevented:', e));
+                } else {
+                    video.pause();
+                }
+            });
+            
+            showNotification(`Autoplay ${autoplayEnabled ? 'enabled' : 'disabled'}`);
+        }
+
+        // Toggle theme
+        function toggleTheme() {
+            darkMode = !darkMode;
+            document.body.classList.toggle('dark-mode', darkMode);
+            
+            const icon = themeToggle.querySelector('i');
+            icon.className = darkMode ? 'fas fa-sun' : 'fas fa-moon';
+            
+            showNotification(`${darkMode ? 'Dark' : 'Light'} mode activated`);
+        }
+
+        // Handle search
+        function handleSearch(e) {
+            searchQuery = e.target.value;
+            loadVideos();
+        }
+
+        // Handle filter
+        function handleFilter(e) {
+            currentFilter = e.target.value;
+            loadVideos();
+        }
+
+        // Handle scroll for pausing videos out of view
+        function handleScroll() {
+            const videos = document.querySelectorAll('video');
+            videos.forEach(video => {
+                const rect = video.getBoundingClientRect();
+                const isInView = rect.top >= 0 && rect.bottom <= window.innerHeight;
+                
+                if (autoplayEnabled && isInView) {
+                    video.play().catch(e => console.log('Autoplay prevented:', e));
+                } else if (!isInView) {
+                    video.pause();
+                }
+            });
+        }
+
+        // Update statistics
+        function updateStats() {
+            totalVideos.textContent = videoFiles.length;
+            totalLikes.textContent = videoFiles.reduce((sum, video) => sum + video.likes, 0);
+            totalViews.textContent = videoFiles.reduce((sum, video) => sum + video.views, 0);
+        }
+
+        // Update last update time
+        function updateLastUpdateTime() {
+            const now = new Date();
+            lastUpdate.textContent = `Last update: ${now.toLocaleTimeString()}`;
+        }
+
+        // Show notification
+        function showNotification(message) {
+            notificationText.textContent = message;
+            notification.classList.add('show');
+            
+            setTimeout(() => {
+                notification.classList.remove('show');
+            }, 3000);
+        }
+
+        // Simulate checking for new videos (without adding new videos automatically)
+        function startVideoChecker() {
+            setInterval(() => {
+                // In a real app, we would fetch from an API
+                console.log('Checking for new videos...');
+                updateLastUpdateTime();
+            }, 10000); // Check every 10 seconds
+        }
+
+        // Initialize the app when the DOM is loaded
+        document.addEventListener('DOMContentLoaded', initApp);
+    
